@@ -1,7 +1,9 @@
 /**
- * MA Doc Checker Service — v5
+ * MA Doc Checker Service — v6
  * Express + Puppeteer API that loads the MA borrower upload portal,
  * waits for the widget to render, and returns document status detail.
+ *
+ * Uses puppeteer-core + @sparticuz/chromium for Render.com compatibility.
  *
  * POST /check-docs
  * Body: { "upload_url": "https://reicapitalguys.com/upload/?loanid=...&token=...&gsid=..." }
@@ -36,8 +38,9 @@
  * GET /health  →  { "status": "ok" }
  */
 
-const express   = require('express');
-const puppeteer = require('puppeteer');
+const express    = require('express');
+const puppeteer  = require('puppeteer-core');
+const chromium   = require('@sparticuz/chromium');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -46,7 +49,7 @@ app.use(express.json());
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'v6', timestamp: new Date().toISOString() });
 });
 
 // ─── Main endpoint ────────────────────────────────────────────────────────────
@@ -59,17 +62,13 @@ app.post('/check-docs', async (req, res) => {
 
   let browser;
   try {
+    const executablePath = await chromium.executablePath();
+
     browser = await puppeteer.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process'
-      ]
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath,
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
@@ -216,5 +215,5 @@ app.post('/check-docs', async (req, res) => {
 
 // ─── Start server ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`MA Doc Checker v5 running on port ${PORT}`);
+  console.log(`MA Doc Checker v6 running on port ${PORT}`);
 });
