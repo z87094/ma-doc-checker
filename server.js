@@ -1,5 +1,5 @@
 /**
- * MA Doc Checker Service — v6
+ * MA Doc Checker Service — v7
  * Express + Puppeteer API that loads the MA borrower upload portal,
  * waits for the widget to render, and returns document status detail.
  *
@@ -10,7 +10,7 @@
  *
  * Response:
  * {
- *   "all_docs_approved": false,          ← GHL branches on this
+ *   "all_docs_approved": false,
  *   "total_conditions": 7,
  *   "approved_count": 2,
  *   "under_review_count": 3,
@@ -22,20 +22,26 @@
  *   "approved_docs": ["Guarantor IDs", "Comps or Appraisal"]
  * }
  *
- * all_docs_approved = true only when every visible condition is status-accepted.
+ * all_docs_approved = true only when every visible condition is approved/accepted.
+ *
+ * Changelog v6 to v7:
+ * - Added status-approved as a recognized approved state (used by MA for "In Profile" docs).
+ *   Previously, status-approved fell through to the catch-all and was counted as missing.
+ * - Updated version string to v7.
  *
  * Condition-level CSS classes on #maconditions_* divs:
- *   status-unsubmitted    → no files uploaded (missing)
- *   status-under-review   → files uploaded, waiting for review
- *   status-accepted       → all files approved
- *   status-rejected       → file(s) rejected
- *   status-change-required → file(s) need changes
+ *   status-unsubmitted    - no files uploaded (missing)
+ *   status-under-review   - files uploaded, waiting for review
+ *   status-accepted       - all files approved (standard)
+ *   status-approved       - approved / reused from profile ("In Profile")
+ *   status-rejected       - file(s) rejected
+ *   status-change-required - file(s) need changes
  *
  * Note: MA sometimes uses status-unsubmitted even when files exist but are
  * rejected/need changes. We check file-level data-filestatus to distinguish:
  *   4 = Changes Needed, 5 = Rejected
  *
- * GET /health  →  { "status": "ok" }
+ * GET /health  ->  { "status": "ok" }
  */
 
 const express    = require('express');
@@ -47,12 +53,10 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: 'v6', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'v7', timestamp: new Date().toISOString() });
 });
 
-// ─── Main endpoint ────────────────────────────────────────────────────────────
 app.post('/check-docs', async (req, res) => {
   const { upload_url } = req.body;
 
@@ -78,7 +82,6 @@ app.post('/check-docs', async (req, res) => {
 
     await page.goto(upload_url, { waitUntil: 'networkidle2', timeout: 30000 });
 
-    // Poll for conditions to render (MA widget loads asynchronously)
     let conditionsFound = false;
     for (let i = 0; i < 4; i++) {
       await new Promise(r => setTimeout(r, 5000));
@@ -105,10 +108,8 @@ app.post('/check-docs', async (req, res) => {
       });
     }
 
-    // Small settle wait to ensure data-docname attributes are fully populated
     await new Promise(r => setTimeout(r, 2000));
 
-    // Extract full condition detail
     const result = await page.evaluate(() => {
       const condDivs = document.querySelectorAll('[id^="maconditions_"]');
       const missing        = [];
@@ -123,7 +124,7 @@ app.post('/check-docs', async (req, res) => {
                             (div.querySelector('.MA_doctitle span') || {}).textContent || 'Unknown';
         const fileCount   = parseInt(div.getAttribute('data-filecount') || '0', 10);
 
-        if (condClass.includes('status-accepted')) {
+        if (condClass.includes('status-accepted') || condClass.includes('status-approved')) {
           approved.push(name);
           return;
         }
@@ -143,12 +144,10 @@ app.post('/check-docs', async (req, res) => {
           return;
         }
 
-        // status-unsubmitted — could be truly empty OR have rejected/changes-needed files
         if (condClass.includes('status-unsubmitted')) {
           if (fileCount === 0) {
             missing.push(name);
           } else {
-            // Check file-level statuses to distinguish
             const fileItems = div.querySelectorAll('.MA_fileitem');
             let hasRejected = false;
             let hasChanges  = false;
@@ -164,7 +163,6 @@ app.post('/check-docs', async (req, res) => {
           return;
         }
 
-        // Any other unrecognized status — treat as needing attention
         missing.push(name);
       });
 
@@ -196,7 +194,6 @@ app.post('/check-docs', async (req, res) => {
       try { await browser.close(); } catch (_) {}
     }
     console.error('Error checking docs:', err.message);
-    // On error, default to false (keep sending reminders rather than silently stopping)
     return res.json({
       all_docs_approved:   false,
       total_conditions:    0,
@@ -213,7 +210,6 @@ app.post('/check-docs', async (req, res) => {
   }
 });
 
-// ─── Start server ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`MA Doc Checker v6 running on port ${PORT}`);
+  console.log('MA Doc Checker v7 running on port ' + PORT);
 });
